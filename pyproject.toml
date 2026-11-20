@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fast-api-baknd"
+version = "0.1.0"
+description = "FastAPI Gist backend — user-owned gist management with JWT authentication"
+requires-python = ">=3.13"
+
+dependencies = [
+    "fastapi>=0.116.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlmodel>=0.0.22",
+    "psycopg2-binary>=2.9.10",
+    "alembic>=1.14.0",
+    "pyjwt>=2.10.0",
+    "pwdlib[argon2]>=0.2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "httpx>=0.28.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "httpx>=0.28.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

@@ -1,0 +1,59 @@
+# Git
+.git/
+.gitignore
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# Frontend artefacts to ignore from root build context
+frontend/node_modules/
+frontend/dist/
+# Distribution and packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Testing and linting caches
+.pytest_cache/
+.coverage
+htmlcov/
+*.coveragerc
+.mypy_cache/
+.ruff_cache/
+alembic/__pycache__/
+
+# Logs
+logs/
+*.log
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Editor and OS files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,15 @@
+node_modules/
+# Build output
+dist/
+# Test coverage
+coverage/
+# Git metadata
+.git/
+# Environment files
+.env
+.env.*
+# npm debug logs
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+pnpm-debug.log
