@@ -3,6 +3,7 @@ pipeline {
 
     options {
         disableConcurrentBuilds()
+        skipDefaultCheckout(true)
         timeout(time: 30, unit: 'MINUTES')
     }
 
@@ -73,6 +74,7 @@ pipeline {
             }
         }
 
+        
         stage('Verify') {
             steps {
                 withCredentials([
@@ -81,35 +83,65 @@ pipeline {
                 ]) {
                     bat '''
                         @echo off
+                        setlocal
+
+                        echo ========================================
+                        echo       VERIFYING COMPOSE SERVICES
+                        echo ========================================
+
+                        set "RUNNING_SERVICES_FILE=%WORKSPACE%\\running-services-%BUILD_NUMBER%.txt"
+
+                        echo.
+                        echo Checking running Docker Compose services...
+
+                        "%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running --services > "%RUNNING_SERVICES_FILE%"
+
+                        if errorlevel 1 (
+                            echo [ERROR] Docker Compose service query failed.
+                            if exist "%RUNNING_SERVICES_FILE%" type "%RUNNING_SERVICES_FILE%"
+                            exit /b 1
+                        )
+
+                        echo.
                         echo --- Running Services ---
-                        "%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running
+                        type "%RUNNING_SERVICES_FILE%"
                         echo.
 
-                        set DB_ID=
-                        for /f "tokens=*" %%i in ('"%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running db -q') do set DB_ID=%%i
-                        if not defined DB_ID (
-                            echo [ERROR] Service 'db' is NOT running!
+                        echo Checking database service...
+                        findstr /x /c:"db" "%RUNNING_SERVICES_FILE%" >nul
+                        if errorlevel 1 (
+                            echo [ERROR] Service db is NOT running!
+                            del /q "%RUNNING_SERVICES_FILE%" 2>nul
                             exit /b 1
                         )
-                        echo [OK] Service 'db' is running (Container: %DB_ID%).
+                        echo [OK] Database service is running.
 
-                        set BACKEND_ID=
-                        for /f "tokens=*" %%i in ('"%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running backend -q') do set BACKEND_ID=%%i
-                        if not defined BACKEND_ID (
-                            echo [ERROR] Service 'backend' is NOT running!
+                        echo.
+                        echo Checking backend service...
+                        findstr /x /c:"backend" "%RUNNING_SERVICES_FILE%" >nul
+                        if errorlevel 1 (
+                            echo [ERROR] Service backend is NOT running!
+                            del /q "%RUNNING_SERVICES_FILE%" 2>nul
                             exit /b 1
                         )
-                        echo [OK] Service 'backend' is running (Container: %BACKEND_ID%).
+                        echo [OK] Backend service is running.
 
-                        set FRONTEND_ID=
-                        for /f "tokens=*" %%i in ('"%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running frontend -q') do set FRONTEND_ID=%%i
-                        if not defined FRONTEND_ID (
-                            echo [ERROR] Service 'frontend' is NOT running!
+                        echo.
+                        echo Checking frontend service...
+                        findstr /x /c:"frontend" "%RUNNING_SERVICES_FILE%" >nul
+                        if errorlevel 1 (
+                            echo [ERROR] Service frontend is NOT running!
+                            del /q "%RUNNING_SERVICES_FILE%" 2>nul
                             exit /b 1
                         )
-                        echo [OK] Service 'frontend' is running (Container: %FRONTEND_ID%).
+                        echo [OK] Frontend service is running.
 
-                        echo [SUCCESS] All expected services (db, backend, frontend) are confirmed running.
+                        del /q "%RUNNING_SERVICES_FILE%"
+
+                        echo.
+                        echo ========================================
+                        echo [SUCCESS] All three services are running!
+                        echo ========================================
                     '''
                 }
             }
