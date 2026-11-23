@@ -75,73 +75,72 @@ pipeline {
         }
 
         
+        
         stage('Verify') {
             steps {
                 withCredentials([
                     file(credentialsId: 'gisthub-app-env', variable: 'APP_ENV_FILE'),
                     file(credentialsId: 'gisthub-docker-env', variable: 'DOCKER_ENV_FILE')
                 ]) {
-                    bat '''
-                        @echo off
-                        setlocal
+                    powershell '''
+                        $ErrorActionPreference = 'Stop'
 
-                        echo ========================================
-                        echo       VERIFYING COMPOSE SERVICES
-                        echo ========================================
+                        Write-Host "========================================"
+                        Write-Host "       VERIFYING COMPOSE SERVICES"
+                        Write-Host "========================================"
 
-                        set "RUNNING_SERVICES_FILE=%WORKSPACE%\\running-services-%BUILD_NUMBER%.txt"
+                        $docker = $env:DOCKER_CLI
 
-                        echo.
-                        echo Checking running Docker Compose services...
-
-                        "%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running --services > "%RUNNING_SERVICES_FILE%"
-
-                        if errorlevel 1 (
-                            echo [ERROR] Docker Compose service query failed.
-                            if exist "%RUNNING_SERVICES_FILE%" type "%RUNNING_SERVICES_FILE%"
-                            exit /b 1
+                        $dockerArgs = @(
+                            'compose'
+                            '-p'
+                            'fast_api_baknd'
+                            '--env-file'
+                            $env:APP_ENV_FILE
+                            '--env-file'
+                            $env:DOCKER_ENV_FILE
+                            'ps'
+                            '--status'
+                            'running'
+                            '--services'
                         )
 
-                        echo.
-                        echo --- Running Services ---
-                        type "%RUNNING_SERVICES_FILE%"
-                        echo.
+                        Write-Host "`nChecking running Docker Compose services..."
 
-                        echo Checking database service...
-                        findstr /x /c:"db" "%RUNNING_SERVICES_FILE%" >nul
-                        if errorlevel 1 (
-                            echo [ERROR] Service db is NOT running!
-                            del /q "%RUNNING_SERVICES_FILE%" 2>nul
-                            exit /b 1
+                        $runningServices = @(& $docker @dockerArgs)
+                        $dockerExitCode = $LASTEXITCODE
+
+                        if ($dockerExitCode -ne 0) {
+                            throw "Docker Compose query failed with exit code $dockerExitCode"
+                        }
+
+                        $runningServices = @(
+                            $runningServices |
+                            ForEach-Object { ([string]$_).Trim() } |
+                            Where-Object { $_ -ne '' }
                         )
-                        echo [OK] Database service is running.
 
-                        echo.
-                        echo Checking backend service...
-                        findstr /x /c:"backend" "%RUNNING_SERVICES_FILE%" >nul
-                        if errorlevel 1 (
-                            echo [ERROR] Service backend is NOT running!
-                            del /q "%RUNNING_SERVICES_FILE%" 2>nul
-                            exit /b 1
+                        Write-Host "`n--- Running Services ---"
+                        $runningServices | ForEach-Object { Write-Host $_ }
+
+                        $expectedServices = @('db', 'backend', 'frontend')
+
+                        $missingServices = @(
+                            $expectedServices |
+                            Where-Object { $runningServices -notcontains $_ }
                         )
-                        echo [OK] Backend service is running.
 
-                        echo.
-                        echo Checking frontend service...
-                        findstr /x /c:"frontend" "%RUNNING_SERVICES_FILE%" >nul
-                        if errorlevel 1 (
-                            echo [ERROR] Service frontend is NOT running!
-                            del /q "%RUNNING_SERVICES_FILE%" 2>nul
-                            exit /b 1
-                        )
-                        echo [OK] Frontend service is running.
+                        if ($missingServices.Count -gt 0) {
+                            throw "The following services are NOT running: $($missingServices -join ', ')"
+                        }
 
-                        del /q "%RUNNING_SERVICES_FILE%"
+                        Write-Host "`n[OK] Database service is running."
+                        Write-Host "[OK] Backend service is running."
+                        Write-Host "[OK] Frontend service is running."
 
-                        echo.
-                        echo ========================================
-                        echo [SUCCESS] All three services are running!
-                        echo ========================================
+                        Write-Host "`n========================================"
+                        Write-Host "[SUCCESS] All three services are running!"
+                        Write-Host "========================================"
                     '''
                 }
             }
