@@ -73,43 +73,72 @@ pipeline {
             }
         }
 
+        
         stage('Verify') {
             steps {
                 withCredentials([
                     file(credentialsId: 'gisthub-app-env', variable: 'APP_ENV_FILE'),
                     file(credentialsId: 'gisthub-docker-env', variable: 'DOCKER_ENV_FILE')
                 ]) {
-                    bat '''
-                        @echo off
-                        echo --- Running Services ---
-                        "%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running
-                        echo.
+                    powershell '''
+                        $ErrorActionPreference = 'Stop'
 
-                        set DB_ID=
-                        for /f "tokens=*" %%i in ('"%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running db -q') do set DB_ID=%%i
-                        if not defined DB_ID (
-                            echo [ERROR] Service 'db' is NOT running!
-                            exit /b 1
+                        Write-Host "========================================"
+                        Write-Host "       VERIFYING COMPOSE SERVICES"
+                        Write-Host "========================================"
+
+                        $docker = $env:DOCKER_CLI
+
+                        $dockerArgs = @(
+                            'compose'
+                            '-p'
+                            'fast_api_baknd'
+                            '--env-file'
+                            $env:APP_ENV_FILE
+                            '--env-file'
+                            $env:DOCKER_ENV_FILE
+                            'ps'
+                            '--status'
+                            'running'
+                            '--services'
                         )
-                        echo [OK] Service 'db' is running (Container: %DB_ID%).
 
-                        set BACKEND_ID=
-                        for /f "tokens=*" %%i in ('"%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running backend -q') do set BACKEND_ID=%%i
-                        if not defined BACKEND_ID (
-                            echo [ERROR] Service 'backend' is NOT running!
-                            exit /b 1
+                        Write-Host "`nChecking running Docker Compose services..."
+
+                        $runningServices = @(& $docker @dockerArgs)
+                        $dockerExitCode = $LASTEXITCODE
+
+                        if ($dockerExitCode -ne 0) {
+                            throw "Docker Compose query failed with exit code $dockerExitCode"
+                        }
+
+                        $runningServices = @(
+                            $runningServices |
+                            ForEach-Object { ([string]$_).Trim() } |
+                            Where-Object { $_ -ne '' }
                         )
-                        echo [OK] Service 'backend' is running (Container: %BACKEND_ID%).
 
-                        set FRONTEND_ID=
-                        for /f "tokens=*" %%i in ('"%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" ps --status running frontend -q') do set FRONTEND_ID=%%i
-                        if not defined FRONTEND_ID (
-                            echo [ERROR] Service 'frontend' is NOT running!
-                            exit /b 1
+                        Write-Host "`n--- Running Services ---"
+                        $runningServices | ForEach-Object { Write-Host $_ }
+
+                        $expectedServices = @('db', 'backend', 'frontend')
+
+                        $missingServices = @(
+                            $expectedServices |
+                            Where-Object { $runningServices -notcontains $_ }
                         )
-                        echo [OK] Service 'frontend' is running (Container: %FRONTEND_ID%).
 
-                        echo [SUCCESS] All expected services (db, backend, frontend) are confirmed running.
+                        if ($missingServices.Count -gt 0) {
+                            throw "The following services are NOT running: $($missingServices -join ', ')"
+                        }
+
+                        Write-Host "`n[OK] Database service is running."
+                        Write-Host "[OK] Backend service is running."
+                        Write-Host "[OK] Frontend service is running."
+
+                        Write-Host "`n========================================"
+                        Write-Host "[SUCCESS] All three services are running!"
+                        Write-Host "========================================"
                     '''
                 }
             }
