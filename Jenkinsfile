@@ -253,6 +253,117 @@ pipeline {
                             }
 
                             Write-Host "==============================================`n"
+                            # Diagnostic 3: Test Docker Engine authentication directly.
+                            Write-Host "`n========== DOCKER ENGINE AUTH API TEST =========="
+
+                            $serverApiVersion = (
+                                & $docker version --format '{{.Server.APIVersion}}'
+                            ).Trim()
+
+                            if ([string]::IsNullOrWhiteSpace($serverApiVersion)) {
+                                throw "Could not determine Docker Engine API version."
+                            }
+
+                            $pipeName = ($env:DOCKER_HOST.TrimEnd('/') -split '/')[-1]
+
+                            $authPayload = @{
+                                username     = $dockerHubUsername
+                                password     = $dockerHubToken
+                                serveraddress = 'https://index.docker.io/v1/'
+                            } | ConvertTo-Json -Compress
+
+                            $authPayloadBytes = [System.Text.Encoding]::UTF8.GetBytes(
+                                $authPayload
+                            )
+
+                            $authPipe = $null
+                            $responseMemory = $null
+
+                            try {
+                                $authPipe = New-Object System.IO.Pipes.NamedPipeClientStream(
+                                    '.',
+                                    $pipeName,
+                                    [System.IO.Pipes.PipeDirection]::InOut
+                                )
+
+                                $authPipe.Connect(10000)
+                                $authPipe.ReadTimeout = 30000
+                                $authPipe.WriteTimeout = 30000
+
+                                $requestHeaders = (
+                                    "POST /v$serverApiVersion/auth HTTP/1.1`r`n" +
+                                    "Host: docker`r`n" +
+                                    "Content-Type: application/json`r`n" +
+                                    "Accept: application/json`r`n" +
+                                    "Content-Length: $($authPayloadBytes.Length)`r`n" +
+                                    "Connection: close`r`n`r`n"
+                                )
+
+                                $headerBytes = [System.Text.Encoding]::ASCII.GetBytes(
+                                    $requestHeaders
+                                )
+
+                                $authPipe.Write(
+                                    $headerBytes,
+                                    0,
+                                    $headerBytes.Length
+                                )
+
+                                $authPipe.Write(
+                                    $authPayloadBytes,
+                                    0,
+                                    $authPayloadBytes.Length
+                                )
+
+                                $authPipe.Flush()
+
+                                $responseMemory = New-Object System.IO.MemoryStream
+                                $buffer = New-Object byte[] 8192
+
+                                while (($bytesRead = $authPipe.Read(
+                                    $buffer,
+                                    0,
+                                    $buffer.Length
+                                )) -gt 0) {
+                                    $responseMemory.Write(
+                                        $buffer,
+                                        0,
+                                        $bytesRead
+                                    )
+                                }
+
+                                $responseText = [System.Text.Encoding]::UTF8.GetString(
+                                    $responseMemory.ToArray()
+                                )
+
+                                $statusLine = ($responseText -split "`r`n", 2)[0]
+
+                                Write-Host "Docker Engine API response: $statusLine"
+
+                                if ($statusLine -match '^HTTP/\S+\s+(200|204)\b') {
+                                    Write-Host "[SUCCESS] Docker Engine accepted the registry credentials."
+                                }
+                                else {
+                                    Write-Host "[FAILURE] Docker Engine rejected the registry credentials."
+                                }
+                            }
+                            catch {
+                                Write-Host "[ERROR] Direct Docker Engine authentication test failed."
+                                Write-Host "Diagnostic: $($_.Exception.Message)"
+                            }
+                            finally {
+                                if ($responseMemory) {
+                                    $responseMemory.Dispose()
+                                }
+
+                                if ($authPipe) {
+                                    $authPipe.Dispose()
+                                }
+
+                                $authPayload = $null
+                                $authPayloadBytes = $null
+                                $responseText = $null
+                            }
 
                             # Docker CLI login: pass the PAT through stdin, and explicitly
                             # identify Docker Hub's registry authentication endpoint.
