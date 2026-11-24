@@ -159,6 +159,75 @@ pipeline {
                                 }
 
                                 Write-Host "[SUCCESS] Docker Hub API accepted the Jenkins PAT."
+
+                            Write-Host "`n========== REGISTRY BEARER TOKEN TEST =========="
+
+                            $token = $env:DOCKERHUB_TOKEN.Trim()
+
+                            $credentialPair = "$($env:DOCKERHUB_USERNAME):$token"
+
+                            $credentialBytes = [System.Text.Encoding]::UTF8.GetBytes(
+                                $credentialPair
+                            )
+
+                            $basicAuth = [Convert]::ToBase64String($credentialBytes)
+
+                            $registryTokenUrl = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:sr1r22m/gisthub-backend:pull,push"
+
+                            try {
+                                $registryResponse = Invoke-RestMethod `
+                                    -Uri $registryTokenUrl `
+                                    -Method Get `
+                                    -Headers @{
+                                        Authorization = "Basic $basicAuth"
+                                        Accept = "application/json"
+                                    } `
+                                    -TimeoutSec 30 `
+                                    -ErrorAction Stop
+
+                                $bearerToken = $registryResponse.token
+
+                                if ([string]::IsNullOrWhiteSpace($bearerToken)) {
+                                    $bearerToken = $registryResponse.access_token
+                                }
+
+                                if ([string]::IsNullOrWhiteSpace($bearerToken)) {
+                                    throw "Registry did not return a bearer token."
+                                }
+
+                                Write-Host "[SUCCESS] Registry authentication accepted the credentials."
+                                Write-Host "Registry bearer token received (value hidden)."
+                            }
+                            catch {
+                                $statusCode = $null
+
+                                try {
+                                    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                                        $statusCode = [int]$_.Exception.Response.StatusCode
+                                    }
+                                }
+                                catch {}
+
+                                if ($statusCode) {
+                                    Write-Host "Registry authentication HTTP status: $statusCode"
+                                }
+                                else {
+                                    Write-Host "Registry request error: $($_.Exception.Message)"
+                                }
+
+                                throw "Registry bearer-token authentication failed."
+                            }
+                            finally {
+                                $token = $null
+                                $credentialPair = $null
+                                $credentialBytes = $null
+                                $basicAuth = $null
+                                $bearerToken = $null
+                                $registryResponse = $null
+                            }
+
+                            Write-Host "==============================================`n"
+
                                 Write-Host "Access token received (value hidden)."
                             }
                             catch {
