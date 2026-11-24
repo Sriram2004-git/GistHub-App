@@ -129,7 +129,8 @@ pipeline {
                                 [void]$loginProcess.Start()
                             
                                 # Send PAT directly through standard input.
-                                $loginProcess.StandardInput.WriteLine($env:DOCKERHUB_TOKEN)
+                                $token = $env:DOCKERHUB_TOKEN.Trim()
+                                $loginProcess.StandardInput.WriteLine($token)
                                 $loginProcess.StandardInput.Close()
                             
                                 $loginOutput = $loginProcess.StandardOutput.ReadToEnd()
