@@ -100,9 +100,10 @@ pipeline {
                                 -Path $dockerConfig -Force | Out-Null
 
                             $env:DOCKER_CONFIG = $dockerConfig
-
+                            # Display the username supplied by Jenkins (not secret)
+                            Write-Host "Docker Hub username from Jenkins: $env:DOCKERHUB_USERNAME"   
                             # Authenticate using the Jenkins secret.
-                            # The token is sent through stdin, not arguments.
+                            # The token is sent through stdin, not arguments.UB_USER
                             $env:DOCKERHUB_TOKEN |
                                 & $docker login `
                                     --username $env:DOCKERHUB_USERNAME `
