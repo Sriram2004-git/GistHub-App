@@ -366,68 +366,29 @@ pipeline {
                                 $responseText = $null
                             }
 
-                            # Docker CLI login: pass the PAT through stdin, and explicitly
-                            # identify Docker Hub's registry authentication endpoint.
-                            $loginArguments = @(
-                                'login'
-                                '--username'
-                                $dockerHubUsername
-                                '--password-stdin'
-                                'https://index.docker.io/v1/'
-                            )
+                            # Docker CLI login using native PowerShell standard input.
+                            Write-Host "`n========== DOCKER CLI LOGIN =========="
 
-                            $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
-                            $loginInfo.FileName = $docker
-                            $loginInfo.Arguments = ($loginArguments -join ' ')
-                            $loginInfo.UseShellExecute = $false
-                            $loginInfo.CreateNoWindow = $true
-                            $loginInfo.RedirectStandardInput = $true
-                            $loginInfo.RedirectStandardOutput = $true
-                            $loginInfo.RedirectStandardError = $true
+                            $dockerHubToken |
+                                & $docker login `
+                                    --username $dockerHubUsername `
+                                    --password-stdin `
+                                    'https://index.docker.io/v1/'
 
-                            $loginProcess = New-Object System.Diagnostics.Process
-                            $loginProcess.StartInfo = $loginInfo
+                            $loginExitCode = $LASTEXITCODE
 
-                            try {
-                                [void]$loginProcess.Start()
-
-                                # Send the PAT directly to the Docker CLI without placing it
-                                # in the command line or writing it to the Jenkins log.
-                                $loginProcess.StandardInput.WriteLine($dockerHubToken)
-                                $loginProcess.StandardInput.Close()
-
-                                # Read both redirected streams asynchronously to avoid a
-                                # full output buffer blocking the child process.
-                                $stdoutTask = $loginProcess.StandardOutput.ReadToEndAsync()
-                                $stderrTask = $loginProcess.StandardError.ReadToEndAsync()
-                                $loginProcess.WaitForExit()
-                                $loginOutput = $stdoutTask.Result
-                                $loginError = $stderrTask.Result
-
-                                if ($loginOutput) {
-                                    Write-Host $loginOutput.Trim()
-                                }
-
-                                if ($loginProcess.ExitCode -ne 0) {
-                                    if ($loginError) {
-                                        Write-Host $loginError.Trim()
-                                    }
-                                    throw "Docker Hub authentication failed. Check the Docker CLI registry login result."
-                                }
-
-                                if ($loginError) {
-                                    Write-Host $loginError.Trim()
-                                }
-
-                                Write-Host "[SUCCESS] Docker Hub authentication successful."
-                            }
-                            finally {
-                                $loginProcess.Dispose()
-                                $dockerHubToken = $null
+                            if ($loginExitCode -ne 0) {
+                                throw "Docker Hub login failed with exit code $loginExitCode."
                             }
 
-                            Write-Host "`nDocker Hub login successful."
+                            Write-Host "[SUCCESS] Docker Hub authentication successful."
 
+                            $dockerHubToken = $null
+
+                            Write-Host "======================================`n"
+                            Write-Host "Docker Hub login successful."
+                            
+                            # Image tagging and publishing
                             $images = @(
                                 @{
                                     LocalImage = 'gisthub-frontend:local'
