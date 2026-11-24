@@ -287,8 +287,9 @@ pipeline {
                                 )
 
                                 $authPipe.Connect(10000)
-                                $authPipe.ReadTimeout = 30000
-                                $authPipe.WriteTimeout = 30000
+                                # NamedPipeClientStream does not support synchronous
+                                # ReadTimeout or WriteTimeout properties.
+                                # Continue using synchronous stream operations.
 
                                 $requestHeaders = (
                                     "POST /v$serverApiVersion/auth HTTP/1.1`r`n" +
