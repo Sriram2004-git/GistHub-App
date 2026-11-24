@@ -3,6 +3,7 @@ pipeline {
 
     options {
         disableConcurrentBuilds()
+        skipDefaultCheckout(true)
         timeout(time: 30, unit: 'MINUTES')
     }
 
@@ -55,6 +56,149 @@ pipeline {
                 ]) {
                     bat '''
                         "%DOCKER_CLI%" compose -p fast_api_baknd --env-file "%APP_ENV_FILE%" --env-file "%DOCKER_ENV_FILE%" build backend frontend
+                    '''
+                }
+            }
+        }
+
+        stage('Publish Images to Docker Hub') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-gisthub',
+                        usernameVariable: 'DOCKERHUB_USERNAME',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    powershell '''
+                        $ErrorActionPreference = 'Stop'
+
+                        $docker = $env:DOCKER_CLI
+                        $namespace = 'sr1r22m'
+
+                        # Get the Git commit used for this build
+                        $commitSha = (& git rev-parse --short=12 HEAD).Trim()
+
+                        if ($LASTEXITCODE -ne 0 -or
+                            [string]::IsNullOrWhiteSpace($commitSha)) {
+                            throw "Unable to determine Git commit SHA."
+                        }
+
+                        Write-Host "Git commit: $commitSha"
+
+                        # Use a temporary Docker configuration directory
+                        # so registry credentials are not retained in
+                        # the Jenkins service account profile.
+                        $dockerConfig = Join-Path `
+                            $env:WORKSPACE `
+                            ".docker-config-$env:BUILD_NUMBER"
+
+                        $previousDockerConfig = $env:DOCKER_CONFIG
+
+                        try {
+                            New-Item -ItemType Directory `
+                                -Path $dockerConfig -Force | Out-Null
+
+                            $env:DOCKER_CONFIG = $dockerConfig
+
+                            # Authenticate using the Jenkins secret.
+                            # The token is sent through stdin, not arguments.
+                            $env:DOCKERHUB_TOKEN |
+                                & $docker login `
+                                    --username $env:DOCKERHUB_USERNAME `
+                                    --password-stdin
+
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "Docker Hub authentication failed."
+                            }
+
+                            Write-Host "`nDocker Hub login successful."
+
+                            $images = @(
+                                @{
+                                    LocalImage = 'gisthub-frontend:local'
+                                    Repository = "$namespace/gisthub-frontend"
+                                },
+                                @{
+                                    LocalImage = 'fastapi-gist-backend:phase2'
+                                    Repository = "$namespace/gisthub-backend"
+                                }
+                            )
+
+                            foreach ($image in $images) {
+                                $repository = $image.Repository
+                                $shaTag = "${repository}:$commitSha"
+                                $latestTag = "${repository}:latest"
+
+                                Write-Host "`n========================================"
+                                Write-Host "Publishing: $repository"
+                                Write-Host "========================================"
+
+                                # Create both image tags.
+                                & $docker tag $image.LocalImage $shaTag
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "Failed to tag $shaTag"
+                                }
+
+                                & $docker tag $image.LocalImage $latestTag
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "Failed to tag $latestTag"
+                                }
+
+                                # Push the commit-specific tag first.
+                                & $docker push $shaTag
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "Failed to push $shaTag"
+                                }
+
+                                # Update the latest tag.
+                                & $docker push $latestTag
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "Failed to push $latestTag"
+                                }
+
+                                # Verify that both tags exist in the registry.
+                                & $docker manifest inspect $shaTag *> $null
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "Registry verification failed for $shaTag"
+                                }
+
+                                & $docker manifest inspect $latestTag *> $null
+
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "Registry verification failed for $latestTag"
+                                }
+
+                                Write-Host "[OK] Published and verified:"
+                                Write-Host "     $shaTag"
+                                Write-Host "     $latestTag"
+                            }
+
+                            Write-Host "`n[SUCCESS] Both images published to Docker Hub."
+
+                        }
+                        finally {
+                            # Restore previous Docker config and remove
+                            # the temporary directory containing auth data.
+                            if ($previousDockerConfig) {
+                                $env:DOCKER_CONFIG = $previousDockerConfig
+                            }
+                            else {
+                                Remove-Item Env:DOCKER_CONFIG `
+                                    -ErrorAction SilentlyContinue
+                            }
+
+                            if (Test-Path $dockerConfig) {
+                                Remove-Item $dockerConfig `
+                                    -Recurse -Force `
+                                    -ErrorAction SilentlyContinue
+                            }
+                        }
                     '''
                 }
             }
