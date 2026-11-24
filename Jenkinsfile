@@ -100,6 +100,29 @@ pipeline {
                                 -Path $dockerConfig -Force | Out-Null
 
                             $env:DOCKER_CONFIG = $dockerConfig
+                            Write-Host "`n========== JENKINS ENVIRONMENT DIAGNOSTICS =========="
+                            
+                            $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+                            Write-Host "Execution identity: $identity"
+                            Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
+                            Write-Host "64-bit process: $([Environment]::Is64BitProcess)"
+                            Write-Host "User profile: $env:USERPROFILE"
+                            Write-Host "DOCKER_HOST: $env:DOCKER_HOST"
+                            Write-Host "DOCKER_CONTEXT: $env:DOCKER_CONTEXT"
+                            Write-Host "DOCKER_CONFIG: $env:DOCKER_CONFIG"
+
+                            Write-Host "DOCKER_AUTH_CONFIG configured: $([bool]$env:DOCKER_AUTH_CONFIG)"
+
+                            foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY')) {
+                                $value = [Environment]::GetEnvironmentVariable($name)
+                                Write-Host "$name configured: $([bool]$value)"
+                            }
+
+                            Write-Host "`nDocker client/server version:"
+                            & $docker version --format 'Client={{.Client.Version}} Server={{.Server.Version}}'
+
+                            Write-Host "Docker version command exit code: $LASTEXITCODE"
+                            Write-Host "=====================================================`n"
                             # Validate Jenkins credentials without displaying the token
                             if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_USERNAME)) {
                                 throw "Docker Hub username is missing from Jenkins credentials."
