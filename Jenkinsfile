@@ -340,7 +340,7 @@ pipeline {
 
                                 Write-Host "Docker Engine API response: $statusLine"
 
-                                if ($statusLine -match '^HTTP/\S+\s+(200|204)\b') {
+                                if ($statusLine -match '^HTTP/[^ ]+ +(200|204)( |$)') {
                                     Write-Host "[SUCCESS] Docker Engine accepted the registry credentials."
                                 }
                                 else {
