@@ -100,17 +100,59 @@ pipeline {
                                 -Path $dockerConfig -Force | Out-Null
 
                             $env:DOCKER_CONFIG = $dockerConfig
-                            # Display the username supplied by Jenkins (not secret)
-                            Write-Host "Docker Hub username from Jenkins: $env:DOCKERHUB_USERNAME"   
-                            # Authenticate using the Jenkins secret.
-                            # The token is sent through stdin, not arguments.UB_USER
-                            $env:DOCKERHUB_TOKEN |
-                                & $docker login `
-                                    --username $env:DOCKERHUB_USERNAME `
-                                    --password-stdin
-
-                            if ($LASTEXITCODE -ne 0) {
-                                throw "Docker Hub authentication failed."
+                            # Validate Jenkins credentials without displaying the token
+                            if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_USERNAME)) {
+                                throw "Docker Hub username is missing from Jenkins credentials."
+                            }
+                            
+                            if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_TOKEN)) {
+                                throw "Docker Hub token is missing from Jenkins credentials."
+                            }
+                            
+                            Write-Host "Docker Hub username from Jenkins: $env:DOCKERHUB_USERNAME"
+                            
+                            # Start Docker login with explicit stdin redirection.
+                            # This avoids the PowerShell pipeline to native executable.
+                            $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
+                            $loginInfo.FileName = $docker
+                            $loginInfo.Arguments = "login --username $($env:DOCKERHUB_USERNAME) --password-stdin"
+                            $loginInfo.UseShellExecute = $false
+                            $loginInfo.CreateNoWindow = $true
+                            $loginInfo.RedirectStandardInput = $true
+                            $loginInfo.RedirectStandardOutput = $true
+                            $loginInfo.RedirectStandardError = $true
+                            
+                            $loginProcess = New-Object System.Diagnostics.Process
+                            $loginProcess.StartInfo = $loginInfo
+                            
+                            try {
+                                [void]$loginProcess.Start()
+                            
+                                # Send PAT directly through standard input.
+                                $loginProcess.StandardInput.WriteLine($env:DOCKERHUB_TOKEN)
+                                $loginProcess.StandardInput.Close()
+                            
+                                $loginOutput = $loginProcess.StandardOutput.ReadToEnd()
+                                $loginError = $loginProcess.StandardError.ReadToEnd()
+                            
+                                $loginProcess.WaitForExit()
+                            
+                                if ($loginOutput) {
+                                    Write-Host $loginOutput.Trim()
+                                }
+                            
+                                if ($loginProcess.ExitCode -ne 0) {
+                                    if ($loginError) {
+                                        Write-Host $loginError.Trim()
+                                    }
+                            
+                                    throw "Docker Hub authentication failed. Check the Jenkins PAT credential."
+                                }
+                            
+                                Write-Host "[SUCCESS] Docker Hub authentication successful!"
+                            }
+                            finally {
+                                $loginProcess.Dispose()
                             }
 
                             Write-Host "`nDocker Hub login successful."
