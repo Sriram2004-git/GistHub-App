@@ -217,7 +217,6 @@ pipeline {
             }
         }
 
-        
         stage('Verify') {
             steps {
                 withCredentials([
