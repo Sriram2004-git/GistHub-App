@@ -101,7 +101,7 @@ pipeline {
 
                             $env:DOCKER_CONFIG = $dockerConfig
                             Write-Host "`n========== JENKINS ENVIRONMENT DIAGNOSTICS =========="
-                            
+
                             $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
                             Write-Host "Execution identity: $identity"
                             Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
@@ -134,6 +134,59 @@ pipeline {
                             
                             Write-Host "Docker Hub username from Jenkins: $env:DOCKERHUB_USERNAME"
                             
+                            Write-Host "`n========== DOCKER HUB API AUTH TEST =========="
+
+                            # Use TLS 1.2 for Windows PowerShell 5.1
+                            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+                            $hubBody = @{
+                                identifier = $env:DOCKERHUB_USERNAME
+                                secret = $env:DOCKERHUB_TOKEN.Trim()
+                            } | ConvertTo-Json -Compress
+
+                            try {
+                                $hubResponse = Invoke-RestMethod `
+                                    -Uri 'https://hub.docker.com/v2/auth/token' `
+                                    -Method Post `
+                                    -ContentType 'application/json' `
+                                    -Headers @{ Accept = 'application/json' } `
+                                    -Body $hubBody `
+                                    -TimeoutSec 30 `
+                                    -ErrorAction Stop
+
+                                if ([string]::IsNullOrWhiteSpace([string]$hubResponse.access_token)) {
+                                    throw "Docker Hub did not return an access token."
+                                }
+
+                                Write-Host "[SUCCESS] Docker Hub API accepted the Jenkins PAT."
+                                Write-Host "Access token received (value hidden)."
+                            }
+                            catch {
+                                $statusCode = $null
+
+                                try {
+                                    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                                        $statusCode = [int]$_.Exception.Response.StatusCode
+                                    }
+                                }
+                                catch {}
+
+                                if ($statusCode) {
+                                    Write-Host "Docker Hub API HTTP status: $statusCode"
+                                }
+                                else {
+                                    Write-Host "Docker Hub API request error: $($_.Exception.Message)"
+                                }
+
+                                throw "Docker Hub API authentication test failed."
+                            }
+                            finally {
+                                $hubBody = $null
+                                $hubResponse = $null
+                            }
+
+                            Write-Host "==============================================`n"
+
                             # Start Docker login with explicit stdin redirection.
                             # This avoids the PowerShell pipeline to native executable.
                             $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
