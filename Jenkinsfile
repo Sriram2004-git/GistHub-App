@@ -76,6 +76,10 @@ pipeline {
                         $docker = $env:DOCKER_CLI
                         $namespace = 'sr1r22m'
 
+                        if (-not (Test-Path -LiteralPath $docker -PathType Leaf)) {
+                            throw "Docker CLI executable was not found: $docker"
+                        }
+
                         # Get the Git commit used for this build
                         $commitSha = (& git rev-parse --short=12 HEAD).Trim()
 
@@ -122,26 +126,31 @@ pipeline {
                             & $docker version --format 'Client={{.Client.Version}} Server={{.Server.Version}}'
 
                             Write-Host "Docker version command exit code: $LASTEXITCODE"
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "Docker CLI could not communicate with the Docker Engine."
+                            }
                             Write-Host "=====================================================`n"
-                            # Validate Jenkins credentials without displaying the token
+                            # Validate Jenkins credentials without displaying the token.
                             if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_USERNAME)) {
                                 throw "Docker Hub username is missing from Jenkins credentials."
                             }
-                            
+
                             if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_TOKEN)) {
                                 throw "Docker Hub token is missing from Jenkins credentials."
                             }
-                            
-                            Write-Host "Docker Hub username from Jenkins: $env:DOCKERHUB_USERNAME"
-                            
-                            Write-Host "`n========== DOCKER HUB API AUTH TEST =========="
 
-                            # Use TLS 1.2 for Windows PowerShell 5.1
+                            $dockerHubUsername = $env:DOCKERHUB_USERNAME.Trim()
+                            $dockerHubToken = $env:DOCKERHUB_TOKEN.Trim()
+
+                            Write-Host "Docker Hub username from Jenkins: $dockerHubUsername"
+
+                            # Diagnostic 1: validate the PAT against the Docker Hub account API.
+                            Write-Host "`n========== DOCKER HUB API AUTH TEST =========="
                             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
                             $hubBody = @{
-                                identifier = $env:DOCKERHUB_USERNAME
-                                secret = $env:DOCKERHUB_TOKEN.Trim()
+                                identifier = $dockerHubUsername
+                                secret = $dockerHubToken
                             } | ConvertTo-Json -Compress
 
                             try {
@@ -159,80 +168,9 @@ pipeline {
                                 }
 
                                 Write-Host "[SUCCESS] Docker Hub API accepted the Jenkins PAT."
-
-                            Write-Host "`n========== REGISTRY BEARER TOKEN TEST =========="
-
-                            $token = $env:DOCKERHUB_TOKEN.Trim()
-
-                            $credentialPair = "$($env:DOCKERHUB_USERNAME):$token"
-
-                            $credentialBytes = [System.Text.Encoding]::UTF8.GetBytes(
-                                $credentialPair
-                            )
-
-                            $basicAuth = [Convert]::ToBase64String($credentialBytes)
-
-                            $registryTokenUrl = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:sr1r22m/gisthub-backend:pull,push"
-
-                            try {
-                                $registryResponse = Invoke-RestMethod `
-                                    -Uri $registryTokenUrl `
-                                    -Method Get `
-                                    -Headers @{
-                                        Authorization = "Basic $basicAuth"
-                                        Accept = "application/json"
-                                    } `
-                                    -TimeoutSec 30 `
-                                    -ErrorAction Stop
-
-                                $bearerToken = $registryResponse.token
-
-                                if ([string]::IsNullOrWhiteSpace($bearerToken)) {
-                                    $bearerToken = $registryResponse.access_token
-                                }
-
-                                if ([string]::IsNullOrWhiteSpace($bearerToken)) {
-                                    throw "Registry did not return a bearer token."
-                                }
-
-                                Write-Host "[SUCCESS] Registry authentication accepted the credentials."
-                                Write-Host "Registry bearer token received (value hidden)."
                             }
                             catch {
                                 $statusCode = $null
-
-                                try {
-                                    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
-                                        $statusCode = [int]$_.Exception.Response.StatusCode
-                                    }
-                                }
-                                catch {}
-
-                                if ($statusCode) {
-                                    Write-Host "Registry authentication HTTP status: $statusCode"
-                                }
-                                else {
-                                    Write-Host "Registry request error: $($_.Exception.Message)"
-                                }
-
-                                throw "Registry bearer-token authentication failed."
-                            }
-                            finally {
-                                $token = $null
-                                $credentialPair = $null
-                                $credentialBytes = $null
-                                $basicAuth = $null
-                                $bearerToken = $null
-                                $registryResponse = $null
-                            }
-
-                            Write-Host "==============================================`n"
-
-                                Write-Host "Access token received (value hidden)."
-                            }
-                            catch {
-                                $statusCode = $null
-
                                 try {
                                     if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
                                         $statusCode = [int]$_.Exception.Response.StatusCode
@@ -256,67 +194,124 @@ pipeline {
 
                             Write-Host "==============================================`n"
 
-                            # Start Docker login with explicit stdin redirection.
-                            # This avoids the PowerShell pipeline to native executable.
+                            # Diagnostic 2: validate registry bearer-token authentication
+                            # independently from the Docker CLI login operation.
+                            Write-Host "`n========== REGISTRY BEARER TOKEN TEST =========="
+
+                            $credentialPair = "${dockerHubUsername}:$dockerHubToken"
+                            $credentialBytes = [System.Text.Encoding]::UTF8.GetBytes($credentialPair)
+                            $basicAuth = [Convert]::ToBase64String($credentialBytes)
+                            $registryTokenUrl = 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:sr1r22m/gisthub-backend:pull,push'
+
+                            try {
+                                $registryResponse = Invoke-RestMethod `
+                                    -Uri $registryTokenUrl `
+                                    -Method Get `
+                                    -Headers @{
+                                        Authorization = "Basic $basicAuth"
+                                        Accept = 'application/json'
+                                    } `
+                                    -TimeoutSec 30 `
+                                    -ErrorAction Stop
+
+                                $bearerToken = $registryResponse.token
+                                if ([string]::IsNullOrWhiteSpace($bearerToken)) {
+                                    $bearerToken = $registryResponse.access_token
+                                }
+
+                                if ([string]::IsNullOrWhiteSpace($bearerToken)) {
+                                    throw "Registry did not return a bearer token."
+                                }
+
+                                Write-Host "[SUCCESS] Registry authentication accepted the credentials."
+                                Write-Host "Registry bearer token received (value hidden)."
+                            }
+                            catch {
+                                $statusCode = $null
+                                try {
+                                    if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                                        $statusCode = [int]$_.Exception.Response.StatusCode
+                                    }
+                                }
+                                catch {}
+
+                                if ($statusCode) {
+                                    Write-Host "Registry authentication HTTP status: $statusCode"
+                                }
+                                else {
+                                    Write-Host "Registry request error: $($_.Exception.Message)"
+                                }
+
+                                throw "Registry bearer-token authentication failed."
+                            }
+                            finally {
+                                $credentialPair = $null
+                                $credentialBytes = $null
+                                $basicAuth = $null
+                                $bearerToken = $null
+                                $registryResponse = $null
+                            }
+
+                            Write-Host "==============================================`n"
+
+                            # Docker CLI login: pass the PAT through stdin, and explicitly
+                            # identify Docker Hub's registry authentication endpoint.
+                            $loginArguments = @(
+                                'login'
+                                '--username'
+                                $dockerHubUsername
+                                '--password-stdin'
+                                'https://index.docker.io/v1/'
+                            )
+
                             $loginInfo = New-Object System.Diagnostics.ProcessStartInfo
                             $loginInfo.FileName = $docker
-                            $loginInfo.Arguments = "login --username $($env:DOCKERHUB_USERNAME) --password-stdin"
+                            $loginInfo.Arguments = ($loginArguments -join ' ')
                             $loginInfo.UseShellExecute = $false
                             $loginInfo.CreateNoWindow = $true
                             $loginInfo.RedirectStandardInput = $true
                             $loginInfo.RedirectStandardOutput = $true
                             $loginInfo.RedirectStandardError = $true
-                            
+
                             $loginProcess = New-Object System.Diagnostics.Process
                             $loginProcess.StartInfo = $loginInfo
-                            
+
                             try {
                                 [void]$loginProcess.Start()
-                            
-                                # Send PAT directly through standard input.
-                                $token = $env:DOCKERHUB_TOKEN.Trim()
-                                # Diagnostic: identify the token without revealing it
-                                $sha256 = [System.Security.Cryptography.SHA256]::Create()
-                                
-                                try {
-                                    $hashBytes = $sha256.ComputeHash(
-                                        [System.Text.Encoding]::UTF8.GetBytes($token)
-                                    )
-                                
-                                    $fingerprint = (
-                                        [BitConverter]::ToString($hashBytes).Replace('-', '')
-                                    ).Substring(0, 16)
-                                
-                                    Write-Host "PAT length: $($token.Length)"
-                                    Write-Host "PAT fingerprint: $fingerprint"
-                                }
-                                finally {
-                                    $sha256.Dispose()
-                                }
-                                $loginProcess.StandardInput.WriteLine($token)
+
+                                # Send the PAT directly to the Docker CLI without placing it
+                                # in the command line or writing it to the Jenkins log.
+                                $loginProcess.StandardInput.WriteLine($dockerHubToken)
                                 $loginProcess.StandardInput.Close()
-                            
-                                $loginOutput = $loginProcess.StandardOutput.ReadToEnd()
-                                $loginError = $loginProcess.StandardError.ReadToEnd()
-                            
+
+                                # Read both redirected streams asynchronously to avoid a
+                                # full output buffer blocking the child process.
+                                $stdoutTask = $loginProcess.StandardOutput.ReadToEndAsync()
+                                $stderrTask = $loginProcess.StandardError.ReadToEndAsync()
                                 $loginProcess.WaitForExit()
-                            
+                                $loginOutput = $stdoutTask.Result
+                                $loginError = $stderrTask.Result
+
                                 if ($loginOutput) {
                                     Write-Host $loginOutput.Trim()
                                 }
-                            
+
                                 if ($loginProcess.ExitCode -ne 0) {
                                     if ($loginError) {
                                         Write-Host $loginError.Trim()
                                     }
-                            
-                                    throw "Docker Hub authentication failed. Check the Jenkins PAT credential."
+                                    throw "Docker Hub authentication failed. Check the Docker CLI registry login result."
                                 }
-                            
-                                Write-Host "[SUCCESS] Docker Hub authentication successful!"
+
+                                if ($loginError) {
+                                    Write-Host $loginError.Trim()
+                                }
+
+                                Write-Host "[SUCCESS] Docker Hub authentication successful."
                             }
                             finally {
                                 $loginProcess.Dispose()
+                                $dockerHubToken = $null
                             }
 
                             Write-Host "`nDocker Hub login successful."
@@ -390,6 +385,8 @@ pipeline {
 
                         }
                         finally {
+                            $dockerHubToken = $null
+
                             # Restore previous Docker config and remove
                             # the temporary directory containing auth data.
                             if ($previousDockerConfig) {
