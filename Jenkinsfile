@@ -130,6 +130,24 @@ pipeline {
                             
                                 # Send PAT directly through standard input.
                                 $token = $env:DOCKERHUB_TOKEN.Trim()
+                                # Diagnostic: identify the token without revealing it
+                                $sha256 = [System.Security.Cryptography.SHA256]::Create()
+                                
+                                try {
+                                    $hashBytes = $sha256.ComputeHash(
+                                        [System.Text.Encoding]::UTF8.GetBytes($token)
+                                    )
+                                
+                                    $fingerprint = (
+                                        [BitConverter]::ToString($hashBytes).Replace('-', '')
+                                    ).Substring(0, 16)
+                                
+                                    Write-Host "PAT length: $($token.Length)"
+                                    Write-Host "PAT fingerprint: $fingerprint"
+                                }
+                                finally {
+                                    $sha256.Dispose()
+                                }
                                 $loginProcess.StandardInput.WriteLine($token)
                                 $loginProcess.StandardInput.Close()
                             
