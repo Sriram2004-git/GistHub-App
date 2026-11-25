@@ -337,6 +337,59 @@ pipeline {
                                     $responseMemory.ToArray()
                                 )
 
+                                # Inspect the Docker Engine AuthResponse without exposing credentials.
+
+                                $statusMarker = '"Status":'
+                                $statusIndex = $responseText.IndexOf(
+                                    $statusMarker,
+                                    [System.StringComparison]::OrdinalIgnoreCase
+                                )
+
+                                if ($statusIndex -ge 0) {
+                                    $valueStart = $responseText.IndexOf(
+                                        '"',
+                                        $statusIndex + $statusMarker.Length
+                                    )
+
+                                    $valueEnd = $responseText.IndexOf('"', $valueStart + 1)
+
+                                    if ($valueStart -ge 0 -and $valueEnd -gt $valueStart) {
+                                        $engineAuthStatus = $responseText.Substring(
+                                            $valueStart + 1,
+                                            $valueEnd - $valueStart - 1
+                                        )
+
+                                        Write-Host "Docker Engine Auth status: $engineAuthStatus"
+                                    }
+                                }
+                                else {
+                                    Write-Host "Docker Engine Auth status field not found."
+                                }
+
+                                $identityMarker = '"IdentityToken":'
+                                $identityIndex = $responseText.IndexOf(
+                                    $identityMarker,
+                                    [System.StringComparison]::OrdinalIgnoreCase
+                                )
+
+                                $identityTokenPresent = $false
+
+                                if ($identityIndex -ge 0) {
+                                    $tokenStart = $responseText.IndexOf(
+                                        '"',
+                                        $identityIndex + $identityMarker.Length
+                                    )
+
+                                    $tokenEnd = $responseText.IndexOf('"', $tokenStart + 1)
+
+                                    $identityTokenPresent = (
+                                        $tokenStart -ge 0 -and
+                                        $tokenEnd -gt $tokenStart + 1
+                                    )
+                                }
+
+                                Write-Host "Identity token returned: $identityTokenPresent"
+
                                 $statusLine = ($responseText -split "`r`n", 2)[0]
 
                                 Write-Host "Docker Engine API response: $statusLine"
