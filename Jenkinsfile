@@ -718,7 +718,7 @@ pipeline {
                         $kubectl = $env:KUBECTL
 
                         Write-Host "===== APPLY APPLICATION CONFIGMAP ====="
-                        $configMapPath = Join-Path $env:WORKSPACE 'k8s\01-configmap.yaml'
+                        $configMapPath = Join-Path (Join-Path $env:WORKSPACE 'k8s') '01-configmap.yaml'
                         $configMapOutput = & $kubectl --kubeconfig $env:KUBECONFIG_FILE apply -f $configMapPath 2>&1
                         $configMapExitCode = $LASTEXITCODE
                         $configMapOutput | ForEach-Object { Write-Host $_ }
