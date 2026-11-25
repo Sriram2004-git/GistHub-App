@@ -419,27 +419,74 @@ pipeline {
                                 $responseText = $null
                             }
 
-                            # Docker CLI login using native PowerShell standard input.
-                            Write-Host "`n========== DOCKER CLI LOGIN =========="
+                            # Create Docker CLI authentication configuration directly.
+                            Write-Host "`n========== DOCKER CLI AUTH CONFIGURATION =========="
 
-                            $dockerHubToken |
-                                & $docker login `
-                                    --username $dockerHubUsername `
-                                    --password-stdin `
-                                    'https://index.docker.io/v1/'
-
-                            $loginExitCode = $LASTEXITCODE
-
-                            if ($loginExitCode -ne 0) {
-                                throw "Docker Hub login failed with exit code $loginExitCode."
+                            if ([string]::IsNullOrWhiteSpace($env:DOCKER_CONFIG)) {
+                                throw "DOCKER_CONFIG is not configured."
                             }
 
-                            Write-Host "[SUCCESS] Docker Hub authentication successful."
+                            $configPath = Join-Path $env:DOCKER_CONFIG 'config.json'
 
+                            # Encode Docker Hub username and PAT in the format expected by Docker.
+                            $credentialText = "${dockerHubUsername}:$dockerHubToken"
+
+                            $credentialBytes = [System.Text.Encoding]::UTF8.GetBytes(
+                                $credentialText
+                            )
+
+                            $authBase64 = [Convert]::ToBase64String($credentialBytes)
+
+                            # Use Docker's standard Docker Hub authentication key.
+                            $dockerAuthConfig = @{
+                                auths = @{
+                                    'https://index.docker.io/v1/' = @{
+                                        auth = $authBase64
+                                    }
+                                }
+                            }
+
+                            # Write config.json as UTF-8 without BOM.
+                            $configJson = $dockerAuthConfig | ConvertTo-Json -Depth 5
+
+                            $utf8NoBom = New-Object `
+                                -TypeName System.Text.UTF8Encoding `
+                                -ArgumentList $false
+
+                            [System.IO.File]::WriteAllText(
+                                $configPath,
+                                $configJson,
+                                $utf8NoBom
+                            )
+
+                            # Verify that the configuration was written correctly.
+                            $storedConfig = Get-Content `
+                                -LiteralPath $configPath `
+                                -Raw |
+                                ConvertFrom-Json -ErrorAction Stop
+
+                            $storedAuth = $storedConfig.auths.'https://index.docker.io/v1/'.auth
+
+                            if ([string]::IsNullOrWhiteSpace($storedAuth) -or
+                                $storedAuth -ne $authBase64) {
+
+                                throw "Docker Hub authentication configuration verification failed."
+                            }
+
+                            Write-Host "[SUCCESS] Docker Hub authentication configuration created."
+                            Write-Host "[SUCCESS] Docker Hub credentials verified in Docker config."
+
+                            # Clear sensitive values from PowerShell variables.
                             $dockerHubToken = $null
+                            $credentialText = $null
+                            $credentialBytes = $null
+                            $authBase64 = $null
+                            $dockerAuthConfig = $null
+                            $configJson = $null
+                            $storedConfig = $null
+                            $storedAuth = $null
 
-                            Write-Host "======================================`n"
-                            Write-Host "Docker Hub login successful."
+                            Write-Host "====================================================`n"
                             
                             # Image tagging and publishing
                             $images = @(
