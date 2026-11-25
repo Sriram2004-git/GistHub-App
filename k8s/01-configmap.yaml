@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gisthub-config
+  namespace: gisthub
+  labels:
+    app.kubernetes.io/part-of: gisthub
+data:
+  LOG_TO_CONSOLE: "true"
