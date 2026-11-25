@@ -640,6 +640,11 @@ pipeline {
                         }
 
                         Write-Host "[SUCCESS] Kubernetes API and namespace-scoped permissions verified."
+
+                        # Expected RBAC denials return kubectl exit code 1.
+                        # Clear that expected status so Jenkins accepts this successful preflight.
+                        $global:LASTEXITCODE = 0
+                        exit 0
                     '''
                 }
             }
